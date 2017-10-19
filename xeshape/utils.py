@@ -1,3 +1,7 @@
+"""Useful functions for waveform template modelling
+(even if you don't like the blueice integration)
+"""
+
 import numba
 import numpy as np
 from scipy import stats
@@ -109,11 +113,6 @@ def average_pulse(time_matrix, wv_matrix, ts):
     t_edges = np.concatenate([[ts[0] - dt/2], ts + dt/2])
 
     h, _ = np.histogram(time_matrix, bins=t_edges, weights=wv_matrix)
+    h = h.astype(np.float)
     h /= h.sum()
     return h
-
-
-def s1_average_pulse_model(*args, **kwargs):
-    """Return average S1 pulse for given model parameters"""
-    wv_matrix, time_matrix, _ = simulate_s1_pulse(*args, **kwargs)
-    return average_pulse(time_matrix, wv_matrix)

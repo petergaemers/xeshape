@@ -11,14 +11,15 @@ requirements = open('requirements.txt').read().splitlines()
 test_requirements = requirements
 
 setup(name='xeshape',
-      version='0.0.1',
+      version='0.0.2',
       description='Utilities for extracting LXe waveform shapes',
       long_description=readme + '\n\n' + history,
       author='Jelle Aalbers',
       author_email='j.aalbers@uva.nl',
       url='https://github.com/jelleaalbers/xeshape',
       license='MIT',
-      py_modules=['xeshape'],
+      packages=['xeshape'],
+      package_dir={'xeshape': 'xeshape'},
       install_requires=requirements,
       #keywords='multihist,histogram',
       #test_suite='tests',
