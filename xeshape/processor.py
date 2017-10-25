@@ -99,13 +99,7 @@ class MatrixProcessor:
                                           weights=wv_matrix, axis=0)**0.5
 
         # Width at fraction of area (1-sample resolution only, interpolation hard to vectorize...)
-        results['fraction_area_width'] = dict()
-        cum_wvs = np.cumsum(wv_matrix, axis=0)
-        for af in [0.5, 0.8]:
-            res = []
-            for f in [(1-af)/2, 1-(1-af)/2]:
-                res.append(np.argmin(np.abs(cum_wvs - f), axis=0))
-            results['fraction_area_width'][af] = (res[1] - res[0]) * self.dt
+        results['fraction_area_width'] = compute_widths(wv_matrix)
 
         ##
         # Compute aligned differences between waveforms and template
@@ -135,5 +129,81 @@ def data_model_difs(wv_matrix, dt, time_shifts, mm, i_noshift):
     for wv_i in range(n_wvs):
         difs[:, wv_i] = wv_matrix[:, wv_i] - mm[:, i_noshift + time_shifts[wv_i]//dt]
     return difs
+
+##
+# Width computation
+##
+
+def compute_widths(wv_matrix, af_widths=(0.25, 0.5, 0.75, 0.9)):
+    """Compute the width of the central area fraction for each waveform
+    :param wv_matrix: (n_samples, n_peaks) waveform matrix (not necessarily aligned or normalized)
+    :param af_widths: list/tuple/array of width fractions you're interested in. Default (0.25, 0.5, 0.75, 0.9)
+    :returns: dictionary {area fraction: array (n_peaks) of widths)
+    """
+    af_widths = np.asarray(af_widths)
+    n_peaks = wv_matrix.shape[1]
+
+    # Which area fraction locations do we need?
+    afs = np.sort(np.concatenate([(1-af_widths)/2, 1-(1-af_widths)/2]))
+
+    # Compute them with numba
+    results = np.zeros((len(afs), n_peaks), dtype=np.float)
+    _compute_afs(wv_matrix, afs, results)
+
+    # Compute the widths from them
+    afs = afs.tolist()
+    width_results = dict()
+    for i, afw in enumerate(af_widths):
+        l_i = afs.index((1-afw)/2)
+        r_i = afs.index(1-(1-afw)/2)
+        width_results[afw] = results[r_i, :] - results[l_i, :]
+
+    return width_results
+
+
+@numba.jit(nopython=True)
+def _compute_afs(wv_matrix, afs, results):
+    # Compute area fraction locations for all waveforms in wv_matrix, put results in (n_afs, n_peaks) array results
+    n_peaks = wv_matrix.shape[1]
+    for wv_i in range(n_peaks):
+        integrate_until_fraction(wv_matrix[:, wv_i], afs, results[:, wv_i])
+
+
+# Below function copied from pax, with @numba.jit added back in (I hope numba's memory management is OK now)
+@numba.jit(nopython=True)
+def integrate_until_fraction(w, fractions_desired, results):
+    """For array of fractions_desired, integrate w until fraction of area is reached, place sample index in results
+    Will add last sample needed fractionally.
+    eg. if you want 25% and a sample takes you from 20% to 30%, 0.5 will be added.
+    Assumes fractions_desired is sorted and all in [0, 1]!
+    """
+    area_tot = w.sum()
+    fraction_seen = 0
+    current_fraction_index = 0
+    needed_fraction = fractions_desired[current_fraction_index]
+    for i, x in enumerate(w):
+        # How much of the area is in this sample?
+        fraction_this_sample = x/area_tot
+        # Will this take us over the fraction we seek?
+        # Must be while, not if, since we can pass several fractions_desired in one sample
+        while fraction_seen + fraction_this_sample >= needed_fraction:
+            # Yes, so we need to add the next sample fractionally
+            area_needed = area_tot * (needed_fraction - fraction_seen)
+            if x != 0:
+                results[current_fraction_index] = i + area_needed/x
+            else:
+                results[current_fraction_index] = i
+            # Advance to the next fraction
+            current_fraction_index += 1
+            if current_fraction_index > len(fractions_desired) - 1:
+                return
+            needed_fraction = fractions_desired[current_fraction_index]
+        # Add this sample's area to the area seen, advance to the next sample
+        fraction_seen += fraction_this_sample
+    if needed_fraction == 1:
+        results[current_fraction_index] = len(w)
+    else:
+        # Sorry, can't add the last fraction to the error message: numba doesn't allow it
+        raise RuntimeError("Fraction not reached in waveform? What the ...?")
 
 
