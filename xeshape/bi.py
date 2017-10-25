@@ -73,7 +73,6 @@ class WaveformLikelihood(bi.BinnedLogLikelihood):
         if len(self.base_model.sources) > 1:
             raise ValueError("WaveformLikelihood only supports one source")
 
-
         self.config.setdefault('error_method', 'KS')
         self.config.setdefault('relative_error', 0)
         self.config.setdefault('absolute_error', 0.001)
@@ -95,7 +94,7 @@ class WaveformLikelihood(bi.BinnedLogLikelihood):
 
         if self.config['error_method'] == 'KS':
             # Minus sign ensures bad fits -> low values, just a like a loglikelihood
-            return -np.max(np.cumsum(waveform_model) - np.cumsum(self.data_waveform))
+            return -np.max(np.abs(np.cumsum(waveform_model) - np.cumsum(self.data_waveform)))
 
         else:
             difs = (waveform_model - self.data_waveform)
