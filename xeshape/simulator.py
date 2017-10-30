@@ -1,16 +1,39 @@
 from copy import deepcopy
 import numpy as np
 import numba
+from scipy import stats
 
 from .utils import model_matrix, centers_to_edges, default_alignment_options
 
 
-def simulate_peak_waveforms(photon_times, ts, spe_pulse, n_dist, n_offsets=4, alignment_options=None):
+def gain_sampler(mu=1, sigma=0.35, dpe_fraction=0.16):
+    """Return function mapping n -> n photon gains
+    :param mu: Mean of 1pe gaussian.
+    :param sigma: Sigma of 1pe gaussian.
+    :param dpe_fraction: Fraction of double photon emission
+    :return: function
+    """
+    spe_gain_sampler = stats.truncnorm(-mu/sigma, float('inf'), loc=mu, scale=sigma)
+    def photon_gain_sampler(n):
+        return spe_gain_sampler.rvs(n) + spe_gain_sampler.rvs(n) * (np.random.rand(n) < dpe_fraction)
+    return photon_gain_sampler
+
+
+def simulate_peak_waveforms(photon_times,
+                            ts,
+                            spe_pulse,
+                            n_sampler,
+                            gain_sampler=gain_sampler(),
+                            n_offsets=4,
+                            alignment_options=None):
     """Simulate matrix (n_samples, n_peaks) of peak waveforms
+
+    Mandatory arguments:
     :param photon_times: 1d array of photon detection times (since e.g. the interaction origin) to draw from
     :param ts: centers of digitizer time grid
     :param spe_pulse: function, taking 1d array of times to
-    :param n_dist: scipy.stats distribution of number of photons per peak.
+    :param n_sampler: function, taking n_peaks to number of photons per peak
+    :param gain_sampler: Function taking n_photons to gains of len(n_photons)
     :param n_offsets: number of offsets in digitizer grid to consider as possible photon arrival times. Default 4.
     :param alignment_options: dictionary of alignment options:
         'method' ('max' or 'area_fraction') and 'area_fraction' (number between 0 and 1)
@@ -30,8 +53,6 @@ def simulate_peak_waveforms(photon_times, ts, spe_pulse, n_dist, n_offsets=4, al
     indices = indices[True ^ ((indices == 0) | (indices == len(t_edges)))]
     # Convert to index in bin centers
     indices -= 1
-
-    # TODO: gain variation simulation
 
     ##
     # Build instruction matrix, simulate waveforms
@@ -55,37 +76,46 @@ def simulate_peak_waveforms(photon_times, ts, spe_pulse, n_dist, n_offsets=4, al
     indices += np.random.randint(0, n_offsets, size=len(indices)) * n_samples
 
     # Divide indices over peaks
-    index_matrix = split_groups(indices, n_x=n_samples * n_offsets, n_dist=n_dist)
+    index_matrix = split_groups(indices,
+                                n_x=n_samples * n_offsets,
+                                weights=gain_sampler(len(indices)),
+                                n_sampler=n_sampler)
 
     # Create and return waveform matrix
     return np.dot(model_m, index_matrix)
 
 
-def split_groups(x, n_x, n_dist):
+def split_groups(x, n_x, n_sampler, weights=None):
     """Splits x into groups and return their histograms. Group size drawn from distr.
     Returns: integer array (n_x, n_groups)
     n_x: number of possible values in x. Assumed to be from 0 ... n_x - 1
-    n_dist: distribution from scipy stats.
+    :param n_sampler: function, taking n_peaks to array of number of photons per peak
+    weights: weights of each x to use in the histogram
     """
+    if weights is None:
+        weights = np.ones(len(x), dtype=np.float)
+
     # We want to exhaust the indices x as best as possible. Draw a generous amount of group sizes.
-    n_groups_est = int(1.5 * len(x) / n_dist.mean())
-    hits_per_group = n_dist.rvs(size=n_groups_est)
+    # For that we need to know roughly what the mean hits per group is
+    mean_hits_per_group = n_sampler(100).mean()
+    n_groups_est = int(1.5 * len(x) / mean_hits_per_group)
+    hits_per_group = n_sampler(n_groups_est)
     hits_per_group = hits_per_group.astype(np.int)
 
-    result = np.zeros((n_x, n_groups_est), dtype=np.int)
-    group_i = _split_groups(x, hits_per_group, result)
-    return result[:,:group_i - 1]
+    result = np.zeros((n_x, n_groups_est), dtype=np.float)
+    group_i = _split_groups(x, weights, hits_per_group, result)
+    return result[:, :group_i - 1]
 
 
 @numba.jit(nopython=True)
-def _split_groups(x, hits_per_group, result):
+def _split_groups(x, weights, hits_per_group, result):
     # Inner loop of split_groups
     group_i = 0
-    for i in x:
+    for i, q in enumerate(x):
         if hits_per_group[group_i] == 0:
             group_i += 1
             continue
-        result[i, group_i] += 1
+        result[q, group_i] += weights[i]
         hits_per_group[group_i] -= 1
     return group_i
 

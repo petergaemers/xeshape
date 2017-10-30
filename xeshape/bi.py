@@ -8,16 +8,14 @@ import numpy as np
 import blueice as bi
 from scipy import stats
 
-from xeshape import utils
+from xeshape.processor import MatrixProcessor
 
 
 def _align_and_average(ts, config, wv_matrix):
     # "method" used in both WaveformSource and WaveformLikelihood to align and average based on config
-    t_matrix, _ = utils.aligned_time_matrix(ts, wv_matrix,
-                                            method=config['alignment_method'],
-                                            area_fraction=config['alignment_area_fraction'])
-
-    return utils.average_pulse(t_matrix, wv_matrix, ts)
+    mp = MatrixProcessor(ts, alignment_options=dict(method=config['alignment_method'],
+                                                    area_fraction=config['alignment_area_fraction']))
+    return mp.process(wv_matrix)['average_waveform']
 
 
 class WaveformSource(bi.Source):
