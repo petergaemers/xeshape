@@ -48,33 +48,32 @@ class MatrixProcessor:
         wv_matrix will be normalized (area = 1 for each waveform) once you pass it in.
         """
         # Normalize the waveforms
-        areas = wv_matrix.sum(axis=0)
-        wv_matrix /= areas[np.newaxis, :]
-        n_samples, n_peaks = wv_matrix.shape
-
-        ##
+        areas = wv_matrix.sum(axis=1)
+        wv_matrix /= areas[:,np.newaxis]
+        n_peaks, n_samples = wv_matrix.shape
+        
         # Find time matrix to align the waveforms
         ##
         if self.alignment_options['method'] == 'max':
             # Align on maximum sample
-            inds = np.argmax(wv_matrix, axis=0)
+            inds = np.argmax(wv_matrix, axis=1)
 
         elif self.alignment_options['method'] == 'area_fraction':
             # Align on point when fixed fraction of area is reached
             # First compute cumulative normalized waveforms
             # (we're always assuming area already sums to one, so we'll do so here too)
-            cum_norm_wvs = np.cumsum(wv_matrix, axis=0)
+            cum_norm_wvs = np.cumsum(wv_matrix, axis=1)
 
             # Find index closest to point where target area fraction is reached
-            inds = np.argmin(np.abs(cum_norm_wvs - self.alignment_options['area_fraction']), axis=0)
+            inds = np.argmin(np.abs(cum_norm_wvs - self.alignment_options['area_fraction']), axis=1)
 
         else:
             raise ValueError('Unknown alignment method %s' % self.alignment_options['method'])
 
         # Construct the time matrix
-        time_matrix = np.repeat(self.ts, n_peaks).reshape(wv_matrix.shape)
+        time_matrix = np.tile(self.ts,n_peaks).reshape(n_peaks,n_samples)
         time_shifts = self.ts[inds]
-        time_matrix -= time_shifts[np.newaxis, :]
+        time_matrix -= time_shifts[:,np.newaxis]
 
         ##
         # Compute average normalized waveform model
@@ -94,9 +93,9 @@ class MatrixProcessor:
         ##
         # Compute width, other waveform properties later?
         ##
-        results['cog'] = np.average(time_matrix, weights=wv_matrix, axis=0)
-        results['width_std'] = np.average((time_matrix - results['cog'][np.newaxis, :])**2,
-                                          weights=wv_matrix, axis=0)**0.5
+        results['cog'] = np.average(time_matrix, weights=wv_matrix, axis=1)
+        results['width_std'] = np.average((time_matrix - results['cog'][:,np.newaxis])**2,
+                                          weights=wv_matrix, axis=1)**0.5
 
         # Width at fraction of area (1-sample resolution only, interpolation hard to vectorize...)
         results['fraction_area_width'] = compute_widths(wv_matrix)
@@ -115,7 +114,7 @@ class MatrixProcessor:
                                                             mm=results['model_matrix'],
                                                             i_noshift=results['i_noshift'])
         results['data_model_ks'] = np.max(np.abs(np.cumsum(difs, axis=0)), axis=0)
-
+        np.save('./wv_matrix.npy',wv_matrix)
         return results
 
 
@@ -127,7 +126,7 @@ def data_model_difs(wv_matrix, dt, time_shifts, mm, i_noshift):
     n_wvs = wv_matrix.shape[1]
     difs = np.zeros_like(wv_matrix)
     for wv_i in range(n_wvs):
-        difs[:, wv_i] = wv_matrix[:, wv_i] - mm[:, i_noshift + time_shifts[wv_i]//dt]
+        difs[wv_i, :] = wv_matrix[wv_i,:] - mm[i_noshift + time_shifts[wv_i]//dt,:]
     return difs
 
 ##
@@ -141,13 +140,13 @@ def compute_widths(wv_matrix, af_widths=(0.25, 0.5, 0.75, 0.9)):
     :returns: dictionary {area fraction: array (n_peaks) of widths)
     """
     af_widths = np.asarray(af_widths)
-    n_peaks = wv_matrix.shape[1]
+    n_peaks = wv_matrix.shape[0]
 
     # Which area fraction locations do we need?
     afs = np.sort(np.concatenate([(1-af_widths)/2, 1-(1-af_widths)/2]))
 
     # Compute them with numba
-    results = np.zeros((len(afs), n_peaks), dtype=np.float)
+    results = np.zeros((n_peaks, len(afs)), dtype=np.float)
     _compute_afs(wv_matrix, afs, results)
 
     # Compute the widths from them
@@ -156,7 +155,7 @@ def compute_widths(wv_matrix, af_widths=(0.25, 0.5, 0.75, 0.9)):
     for i, afw in enumerate(af_widths):
         l_i = afs.index((1-afw)/2)
         r_i = afs.index(1-(1-afw)/2)
-        width_results[afw] = results[r_i, :] - results[l_i, :]
+        width_results[afw] = results[:,r_i] - results[:,l_i]
 
     return width_results
 
@@ -164,9 +163,9 @@ def compute_widths(wv_matrix, af_widths=(0.25, 0.5, 0.75, 0.9)):
 @numba.jit(nopython=True)
 def _compute_afs(wv_matrix, afs, results):
     # Compute area fraction locations for all waveforms in wv_matrix, put results in (n_afs, n_peaks) array results
-    n_peaks = wv_matrix.shape[1]
+    n_peaks = wv_matrix.shape[0]
     for wv_i in range(n_peaks):
-        integrate_until_fraction(wv_matrix[:, wv_i], afs, results[:, wv_i])
+        integrate_until_fraction(wv_matrix[wv_i,:], afs, results[wv_i,:])
 
 
 # Below function copied from pax, with @numba.jit added back in (I hope numba's memory management is OK now)
