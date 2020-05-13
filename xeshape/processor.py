@@ -48,8 +48,9 @@ class MatrixProcessor:
         wv_matrix will be normalized (area = 1 for each waveform) once you pass it in.
         """
         # Normalize the waveforms
-        areas = wv_matrix.sum(axis=1)
-        wv_matrix /= areas[:,np.newaxis]
+        areas_ = wv_matrix.sum(axis=1)
+        areas = areas_[np.where(areas_>0)]
+        wv_matrix = wv_matrix[np.where(areas_ > 0)]
         n_peaks, n_samples = wv_matrix.shape
         
         # Find time matrix to align the waveforms
@@ -79,6 +80,10 @@ class MatrixProcessor:
         # Compute average normalized waveform model
         ##
         h, _ = np.histogram(time_matrix, bins=self.t_edges, weights=wv_matrix)
+        np.save('./tm.npy',time_matrix)
+        np.save('./edges.npy',self.t_edges)
+        np.save('./wvmatrix.npy',wv_matrix)
+        np.save('./hist.npy',h)
         h = h.astype(np.float)
         h /= h.sum()
 
@@ -114,7 +119,6 @@ class MatrixProcessor:
                                                             mm=results['model_matrix'],
                                                             i_noshift=results['i_noshift'])
         results['data_model_ks'] = np.max(np.abs(np.cumsum(difs, axis=0)), axis=0)
-        np.save('./wv_matrix.npy',wv_matrix)
         return results
 
 
