@@ -11,7 +11,7 @@ requirements = open('requirements.txt').read().splitlines()
 test_requirements = requirements
 
 setup(name='xeshape',
-      version='0.0.2',
+      version='0.0.3',
       description='Utilities for extracting LXe waveform shapes',
       long_description=readme + '\n\n' + history,
       author='Jelle Aalbers',
