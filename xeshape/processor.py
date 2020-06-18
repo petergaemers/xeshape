@@ -80,10 +80,6 @@ class MatrixProcessor:
         # Compute average normalized waveform model
         ##
         h, _ = np.histogram(time_matrix, bins=self.t_edges, weights=wv_matrix)
-        np.save('./tm.npy',time_matrix)
-        np.save('./edges.npy',self.t_edges)
-        np.save('./wvmatrix.npy',wv_matrix)
-        np.save('./hist.npy',h)
         h = h.astype(np.float)
         h /= h.sum()
 
